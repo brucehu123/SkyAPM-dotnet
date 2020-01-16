@@ -1,13 +1,13 @@
-﻿using System;
-using System.Globalization;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
+﻿using Microsoft.AspNetCore.Builder;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using SkyApm.Sample.Backend.Models;
 using SkyApm.Sample.Backend.Sampling;
+using SkyApm.Sample.Backend.Services;
+using SkyApm.Sample.GrpcServer;
 using SkyApm.Tracing;
 
 namespace SkyApm.Sample.Backend
@@ -24,32 +24,39 @@ namespace SkyApm.Sample.Backend
         // This method gets called by the runtime. Use this method to add services to the container.
         public void ConfigureServices(IServiceCollection services)
         {
-            services.AddMvc();
-            var sqliteConnection = new SqliteConnection("DataSource=:memory:");
-            sqliteConnection.Open();
+            services.AddControllers();
+            var sqlLiteConnection = new SqliteConnection("DataSource=:memory:");
+            sqlLiteConnection.Open();
 
-            services.AddEntityFrameworkSqlite().AddDbContext<SampleDbContext>(c => c.UseSqlite(sqliteConnection));
+            services.AddEntityFrameworkSqlite().AddDbContext<SampleDbContext>(c => c.UseSqlite(sqlLiteConnection));
 
             services.AddSingleton<ISamplingInterceptor, CustomSamplingInterceptor>();
+
+            // DI grpc service
+            services.AddSingleton<GreeterGrpcService>();
+
+            services.AddGrpc();
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
-        public void Configure(IApplicationBuilder app, IHostingEnvironment env)
+        public void Configure(IApplicationBuilder app, IHostEnvironment env)
         {
             if (env.IsDevelopment())
             {
                 app.UseDeveloperExceptionPage();
             }
 
-            using (var scope = app.ApplicationServices.CreateScope())
-            {
-                using (var sampleDbContext = scope.ServiceProvider.GetService<SampleDbContext>())
-                {
-                    sampleDbContext.Database.EnsureCreated();
-                }
-            }
+            using var scope = app.ApplicationServices.CreateScope();
+            using var sampleDbContext = scope.ServiceProvider.GetService<SampleDbContext>();
+            sampleDbContext.Database.EnsureCreated();
 
-            app.UseMvc();
+            app.UseRouting();
+
+            app.UseEndpoints(endpoint =>
+            {
+                endpoint.MapDefaultControllerRoute();
+                endpoint.MapGrpcService<GreeterImpl>();
+            });
         }
     }
 }
